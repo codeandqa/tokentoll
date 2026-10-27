@@ -140,7 +140,7 @@ coding costs, using the token counts your tools already write to disk (see
 |---|---|
 | **Skill** (`/tokentoll`) | Ask "how green is my coding?" and Claude runs the estimator and explains the result. |
 | **Dashboard** | An HTML page with animated tiles, a daily chart, and breakdowns by session, project, model and tool. It can run live, updating every 5 seconds while you work. |
-| **Chat band** (optional) | A one-line strip above the Claude Code prompt with this session's and today's totals, plus **Dashboard** and **Audit** buttons. |
+| **Chat band** (optional) | A strip above the Claude Code prompt, framed and titled **TokenToll**, with this session's and today's totals, plus **Dashboard**, **Carbon audit** and **Close** buttons. |
 
 > **These are estimates, not measurements.** The token counts are exact; they
 > come from your own logs. The energy each token uses is not published by
@@ -167,11 +167,13 @@ coding costs, using the token counts your tools already write to disk (see
 **Chat band:**
 
 ```
-● CO₂  this session 483 g   1.21 kWh heat   1.2 L water   today 3.11 kg        Dashboard   Audit   Close
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ ● TokenToll  this session 483 g   1.21 kWh heat   1.2 L water   today 3.11 kg   Dashboard   Carbon audit   Close │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 - **Dashboard** starts the live dashboard and opens it in your browser.
-- **Audit** runs `/tokentoll` in the chat for a written breakdown.
+- **Carbon audit** asks Claude, as a normal prompt, to run the TokenToll skill: your footprint, the heaviest sessions and projects, and how to cut them.
 - **Close** hides the band, and stays hidden in new sessions. Type `/tokentoll-band` to show it again (`/tokentoll-band show` and `/tokentoll-band hide` also work).
 - **If the script can't run** (not installed at the path below, or no `python3`), the band shows the reason in place of the numbers.
 
@@ -486,14 +488,16 @@ Measured on one macOS machine with about 4.2 GB of Claude Code logs:
 
 ## How the band works
 
-- **Refreshing.** On session start and after every turn, the band runs
+- **Refreshing.** On session start, after every turn, and whenever it draws
+  with no numbers yet, the band runs
   `carbon.py --json --session <this session>` off the turn's path, then
   redraws with the result.
 - **Dashboard.** Starts `carbon.py --live --port 8765` as a child of the
   session and opens `http://127.0.0.1:8765/` once it's serving. The server
   stops when the session ends. If another dashboard already holds the port,
   the band opens that one.
-- **Audit.** Runs the `/tokentoll` skill.
+- **Carbon audit.** Submits a prompt that starts a turn running the TokenToll skill. (A plugin calling a skill's slash command only records it for the model and starts no turn, so it would look like nothing happened.)
+- **Framed and titled.** The band sits in its own green rounded border titled **TokenToll**, so it never reads as part of another plugin's band.
 - **Close and `/tokentoll-band`.** Hide and show the band. The choice is saved in the mod's store, so it carries over to new sessions, and a hidden band stops refreshing.
 - **Sharing the slot.** If another mod also draws above the prompt (for
   example ponytail's band), it's shown beneath this one, not replaced.
@@ -510,7 +514,7 @@ Measured on one macOS machine with about 4.2 GB of Claude Code logs:
 # flag checks, and the live server refusing other host names
 cd ~/.claude/skills/tokentoll && python3 -m unittest -v test_carbon
 
-# Band: numbers on terminal and desktop, Audit runs /tokentoll,
+# Band: fetches numbers when it first draws, Carbon audit starts a turn,
 # Close and /tokentoll-band (remembered across sessions), error messages
 claude plugin test ~/.claude/skills/tokentoll/band
 ```

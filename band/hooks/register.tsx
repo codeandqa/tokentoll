@@ -10,9 +10,12 @@ const isStarting = atom({ plugin: 'tokentoll-band', key: 'isStarting' } as const
 const isHidden = atom({ plugin: 'tokentoll-band', key: 'isHidden' } as const, false)
 
 const COMMAND = 'tokentoll-band'
+// Sent as a prompt: a plugin's $.command.run of a skill records it for the model but starts no turn.
+const AUDIT_PROMPT =
+  'How green is my coding? Use the tokentoll skill: show my AI carbon footprint for the last 30 days, the heaviest sessions and projects, and how to cut it.'
 
 // Closing is remembered across sessions; /tokentoll-band brings the band back.
-async function setHidden($: EngineInterface, hidden: boolean) {
+async function setBandHidden($: EngineInterface, hidden: boolean) {
   await update($, isHidden, () => hidden)
   await $.store.set('hidden', hidden)
   if (!hidden) void refresh($)
@@ -86,10 +89,10 @@ async function keepServing($: EngineInterface, resolve: () => void) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await $.command.register({ name: COMMAND, description: 'Show or hide the TokenToll band above the prompt' })
     const hidden = (await $.store.get('hidden')) === true
     await update($, isHidden, () => hidden)
     if (!hidden) void refresh($)
+    await $.command.register({ name: COMMAND, description: 'Show or hide the TokenToll band above the prompt' })
     return started
   })
 
@@ -103,7 +106,7 @@ export const register: Register = on => {
   on('command.run', { command: COMMAND }, async ($, e) => {
     const arg = (e.args ?? '').trim()
     const hidden = arg === 'hide' ? true : arg === 'show' ? false : !(await read($, isHidden))
-    await setHidden($, hidden)
+    await setBandHidden($, hidden)
     return { text: hidden ? 'TokenToll band hidden. Type /tokentoll-band to show it again.' : 'TokenToll band shown.' }
   })
 
@@ -113,6 +116,7 @@ export const register: Register = on => {
     const below = await next(e).catch(() => undefined)
     const s = await read($, summary)
     const failure = await read($, error)
+    if (s === null && failure === null) void refresh($) // no numbers yet: fetch them now, not only on the next turn
     const starting = await read($, isStarting)
 
     const dashboard = async () => {
@@ -128,17 +132,22 @@ export const register: Register = on => {
         await update($, isStarting, () => false)
       }
     }
-    const audit = () => $.command.run({ command: 'tokentoll' })
+    const audit = async () => {
+      await $.prompt.submit({ text: AUDIT_PROMPT })
+      $.ui.toast('TokenToll: carbon audit sent to Claude')
+    }
     const close = async () => {
-      await setHidden($, true)
+      await setBandHidden($, true)
       $.ui.toast('TokenToll band hidden. Type /tokentoll-band to show it again.')
     }
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const session = s?.session
     const mine = (
-      <Box flexDirection="row" alignItems="center" gap={2} width={e.props.bodyColumns}>
-        <Text color="success">● CO₂</Text>
+      <Box flexDirection="row" alignItems="center" gap={2} width={e.props.bodyColumns} borderStyle="round" borderColor="success" paddingX={1}>
+        <Text color="success" bold>
+          ● TokenToll
+        </Text>
         {s === null ? (
           failure ? <Text color="warning">{failure}</Text> : <Text dimColor>measuring…</Text>
         ) : (
@@ -151,7 +160,7 @@ export const register: Register = on => {
         )}
         <Box flexGrow={1} />
         <Button key="dashboard" plain label={starting ? 'Starting…' : 'Dashboard'} onPress={dashboard} />
-        <Button key="audit" plain label="Audit" onPress={audit} />
+        <Button key="audit" plain label="Carbon audit" onPress={audit} />
         <Button key="close" plain label="Close" onPress={close} />
       </Box>
     )
