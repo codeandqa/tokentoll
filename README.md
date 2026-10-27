@@ -203,6 +203,7 @@ That gives you:
 ├── SKILL.md            # tells Claude when and how to use the tool
 ├── carbon.py           # the estimator, dashboard and live server
 ├── test_carbon.py      # unit tests
+├── evals/              # behaviour evals for the skill (claude plugin eval)
 ├── README.md
 ├── LICENSE
 └── tokentoll-band/     # the optional chat band (folder name = plugin name)
@@ -518,6 +519,59 @@ cd ~/.claude/skills/tokentoll && python3 -m unittest -v test_carbon
 # Close and /tokentoll-band (remembered across sessions), error messages
 claude plugin test ~/.claude/skills/tokentoll/tokentoll-band
 ```
+
+---
+
+## Evals
+
+The unit tests check the arithmetic. The evals check how **Claude behaves** with
+the skill: does it run TokenToll, read the logs, report honestly, and stay out
+of unrelated work? They use Claude Code's built-in
+[`claude plugin eval`](https://code.claude.com/docs/en/plugin-evals), which runs
+each case in a clean, sandboxed session and scores it. By default each case
+also runs **without** the skill, so you can see what the skill adds.
+
+| Case | What it checks |
+|---|---|
+| `footprint-report` | "How green is my coding?" A setup script plants a known log (1M Sonnet output tokens in project `demo-app`). Claude must use the skill, run `carbon.py`, get **288 g** for demo-app, name the project, and report the range, energy or water without invented figures |
+| `method-sources` | Asked how the numbers are known, Claude credits Epoch AI and Google and says token counts are exact while energy is an estimate |
+| `no-invented-grid` | Asked to use France's grid with no web access, Claude must not quote a grid figure from memory |
+| `how-to-cut` | Asked how to cut emissions, Claude gives the "Pay less toll" habits (`/clear`, `/compact`, smaller models, fewer agents, ...) |
+| `ignores-unrelated` | A plain coding request ("kilometres to miles") must not trigger the skill |
+
+Run it from the repo folder:
+
+```bash
+cd ~/.claude/skills/tokentoll
+claude plugin eval . --scaffold --allow-tools Bash
+```
+
+- **`--scaffold`** runs `footprint-report`'s setup script, which writes the
+  test log into the run's temporary home folder.
+- **`--allow-tools Bash`** lets Claude run `carbon.py`. Eval runs are
+  sandboxed and can't read your real home folder.
+- **In CI** add `--trust-plugin`; `--threshold 1.0` (the default) fails the
+  job if any case drops below a perfect score.
+- **Cost:** each run is a real Claude session on your account. The full suite
+  is 5 cases × 3 runs × 2 arms; one run of every case with both arms cost
+  $1.38 in testing.
+- **Results** go to `evals/results/`, which git ignores, including an HTML
+  report.
+
+**Results when the suite was added** (Claude Code 2.1.308, one run per case
+with and without the skill; the core case run twice more with Bash allowed):
+
+| Case | With TokenToll | Without |
+|---|---|---|
+| footprint-report | 1.00 | 0.25 (no script, so it can't read the logs) |
+| method-sources | 1.00 | 0.67 (doesn't make clear energy is an estimate) |
+| no-invented-grid | 1.00 | 0.00 (quotes a France grid figure from memory) |
+| how-to-cut | 1.00 | 1.00 |
+| ignores-unrelated | 1.00 | 1.00 |
+
+The first run also caught a real gap: Claude added a comparison TokenToll
+doesn't make ("about one dishwasher load"). The skill now says to use only
+TokenToll's own comparisons.
 
 ---
 

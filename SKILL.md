@@ -9,16 +9,18 @@ Turns AI token usage into an energy, carbon, heat and water estimate, with a low
 
 ## Run it
 
+`carbon.py` sits in this skill's base directory (the "Base directory for this skill" shown when the skill loads; usually `~/.claude/skills/tokentoll`). Run it from there:
+
 ```bash
-python3 ~/.claude/skills/tokentoll/carbon.py --days 30
+python3 <skill base directory>/carbon.py --days 30
 ```
 
-Then open the dashboard it prints (`open ~/.claude/tokentoll-report.html` on macOS) and give the user the one-line summary plus the top projects.
+Then open the dashboard it prints (`open ~/.claude/tokentoll-report.html` on macOS) and give the user the one-line summary plus the top projects. For everyday comparisons use only the ones TokenToll itself shows (km in a petrol car, phone charges, half-litre bottles); don't add others from memory.
 
 **Live mode** (when the user wants to watch it while they work): run it in the background and open the URL it prints.
 
 ```bash
-python3 ~/.claude/skills/tokentoll/carbon.py --live --port 8765
+python3 <skill base directory>/carbon.py --live --port 8765
 ```
 
 It serves on 127.0.0.1 only. The page polls every 5 s, and each poll reads only the bytes appended to the logs since the last one. An animated AI chip heats from blue to red and gives off heat waves as the last 5 minutes' rate climbs to 50 g/min, while today's CO2e counter ticks up. Motion stops when the AI is idle or the viewer prefers reduced motion.
@@ -40,5 +42,5 @@ Read `README.md` in this folder (sections Method and Assumptions you can change)
 ## Tests
 
 ```bash
-cd ~/.claude/skills/tokentoll && python3 -m unittest -q test_carbon
+cd <skill base directory> && python3 -m unittest -q test_carbon
 ```

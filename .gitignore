@@ -4,3 +4,4 @@ __pycache__/
 # Written by Claude Code when it loads the band; not source
 tokentoll-band/.claude-plugin/types/
 tokentoll-band/tsconfig.json
+evals/results/
