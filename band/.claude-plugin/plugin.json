@@ -1,0 +1,10 @@
+{
+  "name": "tokentoll-band",
+  "version": "0.1.0",
+  "description": "A band above the chat with this session's and today's estimated CO2e, energy (= heat) and cooling water, and links to the live dashboard and the /tokentoll audit",
+  "types": "./types/index.d.ts",
+  "license": "MIT",
+  "author": {
+    "name": "Aditya Kumar"
+  }
+}

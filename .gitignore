@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.DS_Store
+# Written by Claude Code when it loads the band; not source
+band/.claude-plugin/types/
+band/tsconfig.json
