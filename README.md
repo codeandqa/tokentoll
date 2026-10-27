@@ -6,6 +6,10 @@
 > CO₂, heat and water, live, on your own machine. It's giving main-character
 > energy, but make it accountable. 🌱✨ Touch grass, then check your number. 💀
 
+![TokenToll's live dashboard: today's 6.88 kg CO₂e beside an AI chip glowing orange-red, two active sessions with their g/min, and animated tiles for 471 kg CO₂e (≈ 2,773 km by car), 1,179 kWh (≈ 78,576 phone charges) and 1,179 L of cooling water](docs/dashboard.png)
+
+*The live dashboard (`carbon.py --live`). In the real thing the chip glows, the car drives, the battery charges and the water ripples.*
+
 ## Your AI pair programmer runs on electricity. Now you can see how much.
 
 Every prompt you send lights up a GPU in a data centre somewhere. It draws
