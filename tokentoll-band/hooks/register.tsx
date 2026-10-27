@@ -116,7 +116,6 @@ export const register: Register = on => {
     const below = await next(e).catch(() => undefined)
     const s = await read($, summary)
     const failure = await read($, error)
-    if (s === null && failure === null) void refresh($) // no numbers yet: fetch them now, not only on the next turn
     const starting = await read($, isStarting)
 
     const dashboard = async () => {

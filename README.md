@@ -205,7 +205,7 @@ That gives you:
 ├── test_carbon.py      # unit tests
 ├── README.md
 ├── LICENSE
-└── band/               # the optional chat band
+└── tokentoll-band/     # the optional chat band (folder name = plugin name)
     ├── .claude-plugin/plugin.json
     ├── hooks/hooks.json
     ├── hooks/register.tsx   # the band
@@ -219,7 +219,7 @@ available in your next session.
 **The chat band (optional).** Start Claude Code with the band folder:
 
 ```bash
-claude --plugin-dir ~/.claude/skills/tokentoll/band
+claude --plugin-dir ~/.claude/skills/tokentoll/tokentoll-band
 ```
 
 or list that folder in the `CLAUDE_CODE_PLUGIN_DIRS` environment variable.
@@ -488,8 +488,8 @@ Measured on one macOS machine with about 4.2 GB of Claude Code logs:
 
 ## How the band works
 
-- **Refreshing.** On session start, after every turn, and whenever it draws
-  with no numbers yet, the band runs
+- **Refreshing.** On session start (which also runs whenever the band is
+  reloaded) and after every turn, the band runs
   `carbon.py --json --session <this session>` off the turn's path, then
   redraws with the result.
 - **Dashboard.** Starts `carbon.py --live --port 8765` as a child of the
@@ -514,9 +514,9 @@ Measured on one macOS machine with about 4.2 GB of Claude Code logs:
 # flag checks, and the live server refusing other host names
 cd ~/.claude/skills/tokentoll && python3 -m unittest -v test_carbon
 
-# Band: fetches numbers when it first draws, Carbon audit starts a turn,
+# Band: numbers after session start, Carbon audit starts a turn,
 # Close and /tokentoll-band (remembered across sessions), error messages
-claude plugin test ~/.claude/skills/tokentoll/band
+claude plugin test ~/.claude/skills/tokentoll/tokentoll-band
 ```
 
 ---

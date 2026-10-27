@@ -2,6 +2,7 @@ import argparse
 import http.client
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -177,6 +178,20 @@ class CarbonTest(unittest.TestCase):
                 f.write("not json\n")
             rows = carbon.load_usage_file(path, date(2026, 10, 1))
         self.assertEqual([(r["tool"], r["tokens"]) for r in rows], [("groq", 70), ("ollama", 52)])
+
+    def test_band_folder_manifest_and_state_share_one_name(self):
+        # The engine lets a plugin write only the state stored under its own name, so a mismatch
+        # silently breaks Close and the band's numbers (it did once, after a rename).
+        band = os.path.join(os.path.dirname(SCRIPT), "tokentoll-band")
+        with open(os.path.join(band, ".claude-plugin", "plugin.json")) as f:
+            name = json.load(f)["name"]
+        with open(os.path.join(band, "hooks", "register.tsx")) as f:
+            atoms = set(re.findall(r"plugin: '([^']+)'", f.read()))
+        with open(os.path.join(band, "types", "index.d.ts")) as f:
+            declared = set(re.findall(r"'([^']+)': \{ summary", f.read()))
+        self.assertEqual(os.path.basename(band), name)
+        self.assertEqual(atoms, {name})
+        self.assertEqual(declared, {name})
 
     def test_cache_reads_are_cheapest(self):
         out = carbon.energy_wh({"output_tokens": 1000}, "x")[1]

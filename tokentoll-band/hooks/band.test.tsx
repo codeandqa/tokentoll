@@ -8,21 +8,24 @@ const BAND = {
 
 const SUMMARY = { today: { g: 2104.2, kwh: 5.26, water_l: 5.26 }, session: { g: 377.08, kwh: 0.9427, water_l: 0.943, tokens: 18187465 } }
 
-test('the band fetches its numbers as soon as it draws, and names itself', async ($, on) => {
+test('the band shows this session and today after session start, and names itself', async ($, on) => {
   const runs: string[][] = []
   mock.store(on)
   on('command.register', () => ({ value: { command: 'tokentoll-band' } }))
   on('session.id', () => ({ value: 'b5c1e717' }))
   on('env.get', () => ({ value: '/home/me' }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('process.run', (_, e) => {
     runs.push([...e.argv])
     return { value: { exitCode: 0, stdout: JSON.stringify(SUMMARY), stderr: '' } }
   })
 
-  // No session start and no turn yet: drawing alone fetches the numbers.
-  const first = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await first.find({ type: 'Text', text: /TokenToll/ })).toBeDefined()
-  await first.unmount()
+  const before = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await before.find({ type: 'Text', text: /TokenToll/ })).toBeDefined()
+  expect(await before.find({ type: 'Text', text: /measuring/ })).toBeDefined()
+  await before.unmount()
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for (let i = 0; i < 50 && runs.length === 0; i++) await new Promise(r => setTimeout(r, 10))
   await new Promise(r => setTimeout(r, 20))
   expect(runs[0]).toEqual(['python3', '/home/me/.claude/skills/tokentoll/carbon.py', '--json', '--session', 'b5c1e717'])
