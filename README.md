@@ -37,6 +37,7 @@ Here's one real month of heavy Claude Code use (the author's own, 30 days):
   `pip install`: one Python file.
 - **📚 Sources, not vibes.** Every rate is based on published research (Epoch AI,
   Google) or labelled as an assumption you can change.
+- **✂️ Shows you how to cut it.** [Six habits](#pay-less-toll-how-to-cut-your-footprint-) that shrink the number, biggest first.
 - **🆓 Open source, MIT.**
 
 ### Share your number
@@ -50,6 +51,58 @@ Or the unhinged version:
 
 > not me finding out my AI pair programmer drove ___ km last month 💀 ___% of it was just
 > re-reading my code. the audacity. TokenToll for Claude Code, check yours bestie 🌱 github.com/codeandqa/tokentoll
+
+---
+
+## Pay less toll: how to cut your footprint 🌱
+
+Knowing the number is step one. Here's how to make it smaller.
+
+### Why it's high: the AI re-reads everything, every turn
+
+On each turn, Claude re-reads the whole conversation so far. A session holding
+300,000 tokens of context re-reads all of them on every one of its next 100
+turns. So your footprint grows with **context size × number of turns**, not
+with how much code you write.
+
+In the example month above, **4 long sessions made about 98% of the total**,
+and **about 80%** was the AI re-reading context it had already seen.
+
+### What to change, biggest effect first
+
+1. **Keep sessions short and focused.**
+   - Start a new session, or run `/clear`, when you move to an unrelated task.
+   - A fresh session with a short handoff note re-reads far less than one
+     that has carried the whole day's history.
+   - If a session must keep going, `/compact` shrinks what gets re-read.
+2. **Use fewer agents at once, with narrow briefs.** Every subagent or
+   agent-team member re-reads its own context every turn, so five agents in
+   parallel cost about five times as much. Give each one a tight task, not
+   the whole history.
+3. **Use a smaller model for routine work** (`/model`). In TokenToll's rates,
+   Haiku counts about 0.33× and Opus 1.7× per token, so Haiku comes out
+   roughly 5× cheaper. Search, summaries, simple edits and subagents rarely
+   need the biggest model.
+4. **Trim what loads on every turn.** Memory files, long `CLAUDE.md` files,
+   and the tool lists from connected plugins and MCP servers are sent with
+   every request. Archive stale memory and turn off connections you don't use.
+5. **Batch your asks.**
+   - One message with three requests costs one re-read; three messages cost three.
+   - Avoid tight polling such as `/loop` every minute: each wake-up re-reads
+     the context.
+6. **Ask for less output.** "Show me the diff," not "rewrite the file."
+   Output tokens cost about 3× input in TokenToll's rates.
+
+### How to tell it's working
+
+- **Live:** keep the band visible. "This session" should stay in the hundreds
+  of grams, not climb into kilograms.
+- **Over time:** in the dashboard's **By session** table, your heaviest sessions
+  should shrink, and the daily chart should lose its big spikes.
+
+> **Cut first, offset later.** Anthropic doesn't let you choose which data
+> centre or power grid serves your requests, so these habits are the levers
+> you actually control. Carbon offsets are a weaker fallback, not a substitute.
 
 ---
 
