@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Estimate the energy, carbon, heat and water footprint of your Claude Code usage.
+"""Estimate the energy, carbon, heat and water footprint of your AI coding: Claude Code, Codex, Gemini CLI, and any API.
 
 Reads token counts from ~/.claude/projects/**/*.jsonl and writes an HTML dashboard,
 or with --live serves one on localhost that updates while you work.
@@ -24,7 +24,9 @@ WH_PER_1K = {
     "cache_read": (0.005, 0.02, 0.06),
 }
 # shortcut: model size inferred from relative list price, not published parameters; upgrade if Anthropic publishes energy data
-MODEL_SCALE = {"haiku": 0.33, "sonnet": 1.0, "opus": 1.7, "fable": 1.7}
+# Other vendors: names that mark a small tier count like Haiku; everything else counts as 1.0.
+MODEL_SCALE = {"haiku": 0.33, "sonnet": 1.0, "opus": 1.7, "fable": 1.7,
+               "mini": 0.33, "nano": 0.33, "flash": 0.33, "lite": 0.33, "small": 0.33}
 PUE = 1.2  # data-centre overhead (cooling, power conversion); hyperscalers report ~1.1-1.2
 CAR_G_PER_KM = 170  # average petrol car, real-world
 PHONE_CHARGE_WH = 15
@@ -56,45 +58,74 @@ def energy_wh(usage, model):
     return tuple(sum(toks[k] * WH_PER_1K[k][i] for k in toks) * s for i in range(3))
 
 
-def _complete_lines(f, pos, offsets, path):
-    """Yield whole lines that carry usage; a half-written last line waits for the next poll."""
-    for raw in f:
-        if not raw.endswith(b"\n"):
-            break
-        pos += len(raw)
-        if b'"usage"' in raw or b'-title"' in raw or b'"last-prompt"' in raw:
-            yield raw
+def _new_lines(path, cutoff, offsets, needles=None):
+    """Whole lines appended to `path` since the last call that contain one of `needles` (all lines when None).
+
+    Skips files untouched since `cutoff`; a half-written last line waits for the next call."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return []
+    start = offsets.get(path, 0)
+    if st.st_mtime < cutoff or st.st_size <= start:
+        return []
+    out, pos = [], start
+    with open(path, "rb") as f:
+        f.seek(start)
+        for raw in f:
+            if not raw.endswith(b"\n"):
+                break
+            pos += len(raw)
+            if needles is None or any(n in raw for n in needles):
+                out.append(raw)
     offsets[path] = pos
+    return out
+
+
+def _json_lines(lines):
+    for raw in lines:
+        try:
+            d = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(d, dict):
+            yield d
+
+
+def _ts(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone()
+
+
+def _row(ts, tool, sid, project, model, usage):
+    """One API response as a dashboard row, or None when it used no energy."""
+    wh = energy_wh(usage, model)
+    if not wh[1]:
+        return None
+    return {"ts": ts, "day": ts.date(), "tool": tool, "session": sid, "project": project or "unknown",
+            "model": model or "unknown", "tokens": sum(token_counts(usage).values()), "wh": wh}
+
+
+def _state(state):
+    state = state if state is not None else {}
+    for k in ("offsets", "titles", "projects", "files"):
+        state.setdefault(k, {})
+    state.setdefault("seen", set())
+    return state
 
 
 def load(root, since, state=None, session=None):
-    """One row per unique API response on or after `since` (a date).
+    """Claude Code: one row per unique API response on or after `since` (a date).
 
     Pass the same `state` dict on every call to read only lines appended since the last call.
     `session` limits the scan to that session's own logs (its file and its subagents' folder)."""
-    state = state if state is not None else {}
-    seen, offsets, rows = state.setdefault("seen", set()), state.setdefault("offsets", {}), []
-    titles = state.setdefault("titles", {})  # session id -> (rank, the name Claude Code shows for it)
-    projects = state.setdefault("projects", {})  # session id -> project folder
+    state = _state(state)
+    seen, offsets, titles, projects = state["seen"], state["offsets"], state["titles"], state["projects"]
     cutoff = datetime.combine(since, datetime.min.time()).timestamp()
+    rows = []
     for path in glob.iglob(os.path.join(root, "**", "*.jsonl"), recursive=True):
         if session and session not in os.path.relpath(path, root):
             continue
-        try:
-            st = os.stat(path)
-        except OSError:
-            continue
-        start = offsets.get(path, 0)
-        if st.st_mtime < cutoff or st.st_size <= start:
-            continue
-        with open(path, "rb") as f:
-            f.seek(start)
-            lines = list(_complete_lines(f, start, offsets, path))
-        for raw in lines:
-            try:
-                d = json.loads(raw)
-            except ValueError:
-                continue
+        for d in _json_lines(_new_lines(path, cutoff, offsets, (b'"usage"', b'-title"', b'"last-prompt"'))):
             if d.get("type") in TITLE_FIELDS:
                 field, rank = TITLE_FIELDS[d["type"]]
                 sid, text = d.get("sessionId"), " ".join((d.get(field) or "").split())
@@ -112,30 +143,168 @@ def load(root, since, state=None, session=None):
                 if key in seen:
                     continue
                 seen.add(key)
-            ts = datetime.fromisoformat(d["timestamp"].replace("Z", "+00:00")).astimezone()
+            ts = _ts(d["timestamp"])
             if ts.date() < since:
                 continue
-            wh = energy_wh(m["usage"], m.get("model"))
-            if not wh[1]:
-                continue
             sid = d.get("sessionId") or os.path.basename(path).split(".")[0]
-            project = os.path.basename((d.get("cwd") or "").rstrip("/")) or "unknown"
-            projects.setdefault(sid, project)
-            rows.append({
-                "ts": ts,
-                "day": ts.date(),
-                "session": sid,
-                "project": project,
-                "model": m.get("model") or "unknown",
-                "tokens": sum(token_counts(m["usage"]).values()),
-                "wh": wh,
-            })
+            project = os.path.basename((d.get("cwd") or "").rstrip("/"))
+            row = _row(ts, "claude-code", sid, project, m.get("model"), m["usage"])
+            if row:
+                projects.setdefault(sid, row["project"])
+                rows.append(row)
     return rows
+
+
+def load_codex(root, since, state=None, session=None):
+    """Codex CLI and IDE extension: ~/.codex/sessions/**/rollout-*.jsonl.
+
+    Codex logs a running total per session (input includes cached input; output includes reasoning),
+    so each token_count event counts what the total grew by; repeated events add nothing."""
+    state = _state(state)
+    offsets, titles, projects = state["offsets"], state["titles"], state["projects"]
+    cutoff = datetime.combine(since, datetime.min.time()).timestamp()
+    rows = []
+    needles = (b'"session_meta"', b'"turn_context"', b'"token_count"', b'"user_message"')
+    for path in glob.iglob(os.path.join(root, "**", "*.jsonl"), recursive=True):
+        if session and session not in os.path.relpath(path, root):
+            continue
+        s = state["files"].setdefault(path, {"sid": os.path.basename(path).split(".")[0], "cwd": "", "model": None, "last": {}})
+        for d in _json_lines(_new_lines(path, cutoff, offsets, needles)):
+            p = d.get("payload") if isinstance(d.get("payload"), dict) else {}
+            if d.get("type") == "session_meta":
+                s["sid"], s["cwd"] = p.get("id") or s["sid"], p.get("cwd") or s["cwd"]
+            elif d.get("type") == "turn_context":
+                s["model"] = p.get("model") or s["model"]
+            elif p.get("type") == "user_message" and s["sid"] not in titles:
+                text = " ".join(str(p.get("message") or "").split())
+                if text:
+                    titles[s["sid"]] = (1, text if len(text) <= 120 else text[:119] + "…")
+            elif p.get("type") == "token_count" and isinstance(p.get("info"), dict) and d.get("timestamp"):
+                total = p["info"].get("total_token_usage") or {}
+                grew = {k: (total.get(k) or 0) - (s["last"].get(k) or 0) for k in ("input_tokens", "cached_input_tokens", "output_tokens")}
+                s["last"] = total
+                ts = _ts(d["timestamp"])
+                if ts.date() < since or min(grew.values()) < 0:  # a lower total means a reset: count from it next time
+                    continue
+                usage = {"input_tokens": grew["input_tokens"] - grew["cached_input_tokens"],
+                         "cache_read_input_tokens": grew["cached_input_tokens"], "output_tokens": grew["output_tokens"]}
+                row = _row(ts, "codex", s["sid"], os.path.basename(s["cwd"].rstrip("/")), s["model"], usage)
+                if row:
+                    projects.setdefault(s["sid"], row["project"])
+                    rows.append(row)
+    return rows
+
+
+def _n(v):
+    return v if isinstance(v, (int, float)) and v > 0 else 0
+
+
+def normalize_usage(u):
+    """(fresh input, cache read, output) tokens from any major provider's `usage` object, as the API returns it."""
+    g = lambda *keys: next((_n(u[k]) for k in keys if k in u), 0)
+    sub = lambda key: _n(u[key].get("cached_tokens")) if isinstance(u.get(key), dict) else 0
+    if "cache_read_input_tokens" in u or "cache_creation_input_tokens" in u:
+        # Anthropic Messages API: input_tokens excludes cache reads and writes.
+        return g("input_tokens") + g("cache_creation_input_tokens"), g("cache_read_input_tokens"), g("output_tokens")
+    if "inputTokens" in u:
+        # AWS Bedrock Converse: inputTokens is the uncached remainder; cache reads and writes are separate.
+        return g("inputTokens") + g("cacheWriteInputTokens"), g("cacheReadInputTokens"), g("outputTokens")
+    if "promptTokenCount" in u or "prompt_token_count" in u:
+        # Google Gemini API: cached tokens are part of the prompt; thinking tokens bill as output.
+        prompt = g("promptTokenCount", "prompt_token_count")
+        cached = min(prompt, g("cachedContentTokenCount", "cached_content_token_count"))
+        return prompt - cached, cached, g("candidatesTokenCount", "candidates_token_count") + g("thoughtsTokenCount", "thoughts_token_count")
+    if "prompt_eval_count" in u:
+        # Ollama's native API.
+        return g("prompt_eval_count"), 0, g("eval_count")
+    # OpenAI Chat Completions and OpenAI-compatible APIs (Groq, Mistral, xAI, DeepSeek, OpenRouter, Together, ...),
+    # the OpenAI Responses API, and the plain {input_tokens, output_tokens, cached_tokens} form: cached is part of input.
+    inp = g("prompt_tokens", "input_tokens")
+    cached = min(inp, g("cached_tokens") or sub("prompt_tokens_details") or sub("input_tokens_details"))
+    return inp - cached, cached, g("completion_tokens", "output_tokens")
+
+
+def load_usage_file(path, since, state=None, session=None):
+    """Any API platform: one JSON object per call, appended by your app to the usage file.
+
+    Each line needs "ts" and the provider's usage object, either as "usage" (or "usageMetadata") or at the top
+    level; "model", "tool", "session" and "project" are optional."""
+    state = _state(state)
+    rows = []
+    for d in _json_lines(_new_lines(path, 0, state["offsets"])):
+        if not d.get("ts"):
+            continue
+        ts = _ts(str(d["ts"]))
+        sid = str(d.get("session") or "usage-file")
+        if ts.date() < since or (session and sid != session):
+            continue
+        u = next((d[k] for k in ("usage", "usageMetadata", "usage_metadata") if isinstance(d.get(k), dict)), d)
+        fresh, cached, out = normalize_usage(u)
+        usage = {"input_tokens": fresh, "cache_read_input_tokens": cached, "output_tokens": out}
+        row = _row(ts, str(d.get("tool") or "api"), sid, str(d.get("project") or ""), str(d.get("model") or ""), usage)
+        if row:
+            rows.append(row)
+    return rows
+
+
+def load_gemini_cli(root, since, state=None, session=None):
+    """Gemini CLI: ~/.gemini/tmp/<project>/chats/**/*.jsonl (JSONL sessions; older single-JSON .json files are not read).
+
+    A reply is appended again once its tokens arrive, so each message id counts once, the first time it has tokens.
+    `input` includes `cached`; `thoughts` bill as output; `tool` is extra prompt for tool use."""
+    state = _state(state)
+    offsets, titles, projects, seen = state["offsets"], state["titles"], state["projects"], state["seen"]
+    cutoff = datetime.combine(since, datetime.min.time()).timestamp()
+    rows = []
+    for path in glob.iglob(os.path.join(root, "*", "chats", "**", "*.jsonl"), recursive=True):
+        if session and session not in os.path.relpath(path, root):
+            continue
+        meta = state["files"].setdefault(path, {"sid": os.path.basename(path).split(".")[0], "project": ""})
+        for d in _json_lines(_new_lines(path, cutoff, offsets, (b'"sessionId"', b'"tokens"', b'"type":"user"', b'"type": "user"'))):
+            if d.get("sessionId"):
+                meta["sid"] = d["sessionId"]
+                dirs = d.get("directories")
+                if isinstance(dirs, list) and dirs:
+                    meta["project"] = os.path.basename(str(dirs[0]).rstrip("/"))
+                continue
+            if d.get("type") == "user" and meta["sid"] not in titles:
+                content = d.get("content")
+                text = " ".join((content if isinstance(content, str) else " ".join(
+                    str(p.get("text", "")) for p in content if isinstance(p, dict)) if isinstance(content, list) else "").split())
+                if text:
+                    titles[meta["sid"]] = (1, text if len(text) <= 120 else text[:119] + "…")
+                continue
+            t = d.get("tokens")
+            if d.get("type") != "gemini" or not isinstance(t, dict) or not d.get("timestamp"):
+                continue
+            key = ("gemini", meta["sid"], d.get("id"))
+            if d.get("id"):
+                if key in seen:
+                    continue
+                seen.add(key)
+            ts = _ts(d["timestamp"])
+            if ts.date() < since:
+                continue
+            cached = min(_n(t.get("input")), _n(t.get("cached")))
+            usage = {"input_tokens": _n(t.get("input")) - cached + _n(t.get("tool")), "cache_read_input_tokens": cached,
+                     "output_tokens": _n(t.get("output")) + _n(t.get("thoughts"))}
+            row = _row(ts, "gemini-cli", meta["sid"], meta["project"], d.get("model"), usage)
+            if row:
+                projects.setdefault(meta["sid"], row["project"])
+                rows.append(row)
+    return rows
+
+
+def load_all(a, since, state=None, session=None):
+    """Every supported source: Claude Code, Codex, Gemini CLI, and the usage file."""
+    state = _state(state)
+    return (load(a.root, since, state, session) + load_codex(a.codex_root, since, state, session)
+            + load_gemini_cli(a.gemini_root, since, state, session) + load_usage_file(a.usage_file, since, state, session))
 
 
 def summarize(rows):
     total = [0.0, 0.0, 0.0]
-    by = {k: defaultdict(lambda: [0.0, 0]) for k in ("day", "session", "project", "model")}
+    by = {k: defaultdict(lambda: [0.0, 0]) for k in ("day", "tool", "session", "project", "model")}
     for r in rows:
         for i in range(3):
             total[i] += r["wh"][i]
@@ -162,7 +331,7 @@ def tile_values(total, since, today, grid, wue):
     co2 = [k * grid for k in kwh]
     water = [k * wue for k in kwh]
     return {
-        "meta": f"Claude Code usage, {since:%d %b} – {today:%d %b %Y} · grid {grid:g} gCO₂e/kWh · PUE {PUE} · water {wue:g} L/kWh",
+        "meta": f"AI coding usage, {since:%d %b} – {today:%d %b %Y} · grid {grid:g} gCO₂e/kWh · PUE {PUE} · water {wue:g} L/kWh",
         "co2": fmt_g(co2[1]) + " CO₂e", "co2-range": f"range {fmt_g(co2[0])} – {fmt_g(co2[2])}",
         "co2-eq": f"≈ {co2[1] / CAR_G_PER_KM:,.0f} km in a petrol car",
         "kwh": f"{kwh[1]:,.2f} kWh", "kwh-range": f"range {kwh[0]:,.2f} – {kwh[2]:,.2f} kWh",
@@ -253,7 +422,8 @@ def render_body(total, by, since, today, grid, wue, state=None, live=()):
 <h2>By session</h2>{table("session", "Session", lambda s: e(session_title(state, s)) + (" <span class=live>● live</span>" if s in live else "")
     + f"<div class=sub>{e((state or {}).get('projects', {}).get(s, ''))} · {e(s[:8])}</div>")}
 <h2>By project</h2>{table("project", "Project", lambda p: e(p))}
-<h2>By model</h2>{table("model", "Model", lambda m: e(m))}"""
+<h2>By model</h2>{table("model", "Model", lambda m: e(m))}
+<h2>By tool</h2>{table("tool", "Tool", lambda t: e(t))}"""
 
 
 # The live hero: an AI chip whose core heats from blue to red and gives off heat waves as the token rate rises.
@@ -383,7 +553,7 @@ def serve(a):
     def snapshot():
         today = date.today()
         since = today - timedelta(days=a.days - 1)
-        rows.extend(load(a.root, since, state))
+        rows.extend(load_all(a, since, state))
         rows[:] = [r for r in rows if r["day"] >= since]  # drop days that slid out of the window
         total, by = summarize(rows)
         now = datetime.now().astimezone()
@@ -439,9 +609,9 @@ def json_summary(a):
     """Today's totals across all sessions, and one session's over the window: central g CO2e, kWh, litres."""
     today = date.today()
     figures = lambda wh: {"g": round(wh / 1000 * a.grid, 2), "kwh": round(wh / 1000, 4), "water_l": round(wh / 1000 * a.wue, 3)}
-    out = {"today": figures(summarize(load(a.root, today))[0][1])}
+    out = {"today": figures(summarize(load_all(a, today))[0][1])}
     if a.session:
-        rows = load(a.root, today - timedelta(days=a.days - 1), session=a.session)
+        rows = load_all(a, today - timedelta(days=a.days - 1), session=a.session)
         out["session"] = {**figures(summarize(rows)[0][1]), "tokens": sum(r["tokens"] for r in rows)}
     return out
 
@@ -451,7 +621,11 @@ def main():
     p.add_argument("--days", type=int, default=30, help="how many days back (default 30)")
     p.add_argument("--grid", type=float, default=400, help="grid carbon intensity, gCO2e/kWh (default 400)")
     p.add_argument("--wue", type=float, default=1.0, help="water per kWh, litres (default 1.0)")
-    p.add_argument("--root", default=os.path.expanduser("~/.claude/projects"))
+    p.add_argument("--root", default=os.path.expanduser("~/.claude/projects"), help="Claude Code logs")
+    p.add_argument("--codex-root", default=os.path.expanduser("~/.codex/sessions"), help="Codex CLI / IDE logs")
+    p.add_argument("--gemini-root", default=os.path.expanduser("~/.gemini/tmp"), help="Gemini CLI logs")
+    p.add_argument("--usage-file", default=os.path.expanduser("~/.tokentoll/usage.jsonl"),
+                   help="JSONL your apps append API usage to (OpenAI, Anthropic, Gemini, Bedrock, Groq, ...)")
     p.add_argument("--out", default=os.path.expanduser("~/.claude/tokentoll-report.html"))
     p.add_argument("--live", action="store_true", help="serve a live dashboard on localhost instead of writing a file")
     p.add_argument("--port", type=int, default=8765)
@@ -470,7 +644,7 @@ def main():
     today = date.today()
     since = today - timedelta(days=a.days - 1)
     state = {}
-    total, by = summarize(load(a.root, since, state))
+    total, by = summarize(load_all(a, since, state))
     with open(a.out, "w") as f:
         f.write(page(render_body(total, by, since, today, a.grid, a.wue, state), tile_values(total, since, today, a.grid, a.wue)))
 

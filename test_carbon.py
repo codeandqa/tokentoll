@@ -73,7 +73,8 @@ class CarbonTest(unittest.TestCase):
             now = datetime.now(timezone.utc).isoformat()
             with open(os.path.join(root, "s1.jsonl"), "w") as f:
                 f.write(line("m1", "claude-sonnet-5-5", 1000, ts=now))
-            args = argparse.Namespace(root=root, grid=400, wue=1.0, days=30, session="s1")
+            args = argparse.Namespace(root=root, codex_root=os.path.join(root, "none"), gemini_root=os.path.join(root, "none"),
+                                      usage_file=os.path.join(root, "none.jsonl"), grid=400, wue=1.0, days=30, session="s1")
             out = carbon.json_summary(args)
         # 1k sonnet output tokens = 0.6 Wh x PUE 1.2 = 0.72 Wh = 0.288 g at 400 g/kWh
         self.assertEqual(out, {"today": {"g": 0.29, "kwh": 0.0007, "water_l": 0.001},
@@ -91,7 +92,8 @@ class CarbonTest(unittest.TestCase):
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
         with tempfile.TemporaryDirectory() as root:
-            server = subprocess.Popen([sys.executable, SCRIPT, "--live", "--port", str(port), "--root", root],
+            server = subprocess.Popen([sys.executable, SCRIPT, "--live", "--port", str(port), "--root", root, "--codex-root", root,
+                                       "--gemini-root", root, "--usage-file", os.path.join(root, "u.jsonl")],
                                       stdout=subprocess.PIPE, text=True)
             try:
                 for out in server.stdout:
@@ -106,6 +108,75 @@ class CarbonTest(unittest.TestCase):
                 server.terminate()
                 server.wait()
                 server.stdout.close()
+
+    def test_codex_counts_what_the_running_total_grew_by(self):
+        T = "2026-10-20T12:00:00Z"
+        ev = lambda total: {"timestamp": T, "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": total}}}
+        records = [
+            {"timestamp": T, "type": "session_meta", "payload": {"id": "cx1", "cwd": "/w/app"}},
+            {"timestamp": T, "type": "turn_context", "payload": {"model": "gpt-5-codex"}},
+            {"timestamp": T, "type": "event_msg", "payload": {"type": "user_message", "message": "Fix the login bug"}},
+            {"timestamp": T, "type": "event_msg", "payload": {"type": "token_count", "info": None}},
+            ev({"input_tokens": 1000, "cached_input_tokens": 600, "output_tokens": 100}),
+            ev({"input_tokens": 1000, "cached_input_tokens": 600, "output_tokens": 100}),  # repeated: adds nothing
+            ev({"input_tokens": 3000, "cached_input_tokens": 2000, "output_tokens": 300}),
+        ]
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, "rollout-x.jsonl"), "w") as f:
+                f.writelines(json.dumps(r) + "\n" for r in records)
+            state = {}
+            rows = carbon.load_codex(root, date(2026, 10, 1), state)
+        self.assertEqual([(r["tool"], r["project"], r["model"], r["tokens"]) for r in rows],
+                         [("codex", "app", "gpt-5-codex", 1100), ("codex", "app", "gpt-5-codex", 2200)])
+        self.assertEqual(carbon.session_title(state, "cx1"), "Fix the login bug")
+
+    def test_gemini_cli_counts_each_reply_once(self):
+        T = "2026-10-20T12:00:00Z"
+        reply = {"id": "m1", "timestamp": T, "type": "gemini", "content": "ok", "model": "gemini-2.5-pro",
+                 "tokens": {"input": 1000, "output": 50, "cached": 400, "thoughts": 30, "tool": 10, "total": 1090}}
+        records = [
+            {"sessionId": "g1", "projectHash": "abc", "startTime": T, "lastUpdated": T, "directories": ["/w/site"]},
+            {"id": "u1", "timestamp": T, "type": "user", "content": [{"text": "Add dark mode"}]},
+            {k: v for k, v in reply.items() if k != "tokens"},  # written before its tokens arrive
+            reply,
+            reply,  # appended again: counts once
+            {"$set": {"lastUpdated": T}},
+        ]
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, "abc", "chats"))
+            with open(os.path.join(root, "abc", "chats", "session-1.jsonl"), "w") as f:
+                f.writelines(json.dumps(r) + "\n" for r in records)
+            state = {}
+            rows = carbon.load_gemini_cli(root, date(2026, 10, 1), state)
+        # fresh 1000 - 400 cached + 10 tool, cached 400, output 50 + 30 thoughts
+        self.assertEqual([(r["tool"], r["project"], r["tokens"]) for r in rows], [("gemini-cli", "site", 1090)])
+        self.assertEqual(carbon.session_title(state, "g1"), "Add dark mode")
+
+    def test_every_providers_usage_object_reads_as_fresh_cached_output(self):
+        cases = {
+            "Anthropic": ({"input_tokens": 10, "cache_creation_input_tokens": 5, "cache_read_input_tokens": 100, "output_tokens": 7}, (15, 100, 7)),
+            "OpenAI chat": ({"prompt_tokens": 120, "completion_tokens": 30, "prompt_tokens_details": {"cached_tokens": 100}}, (20, 100, 30)),
+            "Groq (OpenAI-compatible)": ({"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70, "queue_time": 0.01}, (50, 0, 20)),
+            "OpenAI Responses": ({"input_tokens": 120, "output_tokens": 30, "input_tokens_details": {"cached_tokens": 100}}, (20, 100, 30)),
+            "Gemini API": ({"promptTokenCount": 120, "cachedContentTokenCount": 100, "candidatesTokenCount": 30, "thoughtsTokenCount": 5}, (20, 100, 35)),
+            "Gemini Python SDK": ({"prompt_token_count": 120, "cached_content_token_count": 100, "candidates_token_count": 30}, (20, 100, 30)),
+            "AWS Bedrock": ({"inputTokens": 20, "outputTokens": 30, "cacheReadInputTokens": 100, "cacheWriteInputTokens": 4}, (24, 100, 30)),
+            "Ollama": ({"prompt_eval_count": 40, "eval_count": 12}, (40, 0, 12)),
+            "plain": ({"input_tokens": 120, "output_tokens": 30, "cached_tokens": 100}, (20, 100, 30)),
+        }
+        for name, (usage, expected) in cases.items():
+            self.assertEqual(carbon.normalize_usage(usage), expected, name)
+
+    def test_usage_file_reads_nested_and_top_level_usage(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "usage.jsonl")
+            with open(path, "w") as f:
+                f.write(json.dumps({"ts": "2026-10-20T12:00:00Z", "tool": "groq", "model": "llama-x",
+                                    "usage": {"prompt_tokens": 50, "completion_tokens": 20}}) + "\n")
+                f.write(json.dumps({"ts": "2026-10-20T12:01:00Z", "tool": "ollama", "prompt_eval_count": 40, "eval_count": 12}) + "\n")
+                f.write("not json\n")
+            rows = carbon.load_usage_file(path, date(2026, 10, 1))
+        self.assertEqual([(r["tool"], r["tokens"]) for r in rows], [("groq", 70), ("ollama", 52)])
 
     def test_cache_reads_are_cheapest(self):
         out = carbon.energy_wh({"output_tokens": 1000}, "x")[1]

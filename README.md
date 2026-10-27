@@ -10,7 +10,7 @@
 
 Every prompt you send lights up a GPU in a data centre somewhere. It draws
 power, gives off heat, and uses water to stay cool. **TokenToll** turns your
-Claude Code sessions into numbers you can feel:
+AI coding (Claude Code, Codex, Gemini CLI, or any AI API) into numbers you can feel:
 
 > 🚗 **km driven** · 🔋 **phone charges** · 💧 **bottles of cooling water**
 
@@ -29,10 +29,11 @@ Here's one real month of heavy Claude Code use (the author's own, 30 days):
 
 - **👀 See it live.** An animated AI chip heats from blue to red while your
   sessions run, and a counter ticks up as you code.
+- **🤝 Works with the big players.** Claude Code, Codex and Gemini CLI automatically; OpenAI, Anthropic, Gemini, Bedrock, Groq and other APIs [with one line of logging](#log-any-ai-api).
 - **🧾 Every session, by name.** Find which task, project or model cost the most.
 - **💬 Right above your chat.** A one-line band shows this session's footprint
   after every turn.
-- **🔒 Nothing leaves your machine.** It reads Claude Code's local logs, makes
+- **🔒 Nothing leaves your machine.** It reads your AI tools' local logs, makes
   no outbound network calls, and needs no account, no API key and no
   `pip install`: one Python file.
 - **📚 Sources, not vibes.** Every rate is based on published research (Epoch AI,
@@ -45,12 +46,12 @@ Here's one real month of heavy Claude Code use (the author's own, 30 days):
 Run it, then post your own month:
 
 > My AI coding last month: **≈ ___ kg CO₂e**, the same as driving ___ km. ___% of it was
-> the AI re-reading context. Measure yours: TokenToll for Claude Code 🌱 github.com/codeandqa/tokentoll
+> the AI re-reading context. Measure yours: TokenToll 🌱 github.com/codeandqa/tokentoll
 
 Or the unhinged version:
 
 > not me finding out my AI pair programmer drove ___ km last month 💀 ___% of it was just
-> re-reading my code. the audacity. TokenToll for Claude Code, check yours bestie 🌱 github.com/codeandqa/tokentoll
+> re-reading my code. the audacity. TokenToll, check yours bestie 🌱 github.com/codeandqa/tokentoll
 
 ---
 
@@ -104,18 +105,37 @@ and **about 80%** was the AI re-reading context it had already seen.
 > centre or power grid serves your requests, so these habits are the levers
 > you actually control. Carbon offsets are a weaker fallback, not a substitute.
 
+## Works with
+
+| Platform | How TokenToll reads it | How well it's tested |
+|---|---|---|
+| **Claude Code** (Anthropic) | Automatic: `~/.claude/projects` | On real logs |
+| **Codex** CLI and IDE extension (OpenAI) | Automatic: `~/.codex/sessions` | On real logs: matches Codex's own session totals within 0.05% |
+| **Gemini CLI** (Google) | Automatic: `~/.gemini/tmp/<project>/chats/*.jsonl` | Built from Gemini CLI's source code and tested on sample files, not yet on real logs. Sessions from old versions, saved as single `.json` files, aren't read |
+| **APIs:** OpenAI, Anthropic, Google Gemini, AWS Bedrock, Ollama, and OpenAI-compatible APIs such as Groq, Mistral, xAI, DeepSeek, OpenRouter and Together | Your app appends each response's `usage` to `~/.tokentoll/usage.jsonl` ([how](#log-any-ai-api)) | Each provider's usage format is tested with sample objects; not run against the live APIs |
+
+**Not covered:**
+- **Cursor:** its local database records which lines the AI wrote, not token counts.
+- **Web and mobile chat apps** (ChatGPT, Claude.ai, Gemini): they keep usage on the vendor's servers.
+- **GitHub Copilot and Windsurf:** not checked yet.
+- **OpenCode and Aider:** not read automatically yet (OpenCode's storage format is still changing). If you call a model API yourself, the usage file works.
+
+**Hardware caveat:** the energy rates come from studies of GPUs in data
+centres. Groq runs its own LPU chips, and Ollama runs on your own computer, so
+their real energy per token may differ from these estimates.
+
 ---
 
 ## What it is
 
-**TokenToll** estimates how much energy, CO₂, heat and cooling water your
-[Claude Code](https://claude.com/claude-code) sessions cost, using the token
-counts Claude Code already writes to disk. It has three parts:
+**TokenToll** estimates how much energy, CO₂, heat and cooling water your AI
+coding costs, using the token counts your tools already write to disk (see
+[Works with](#works-with)). It has three parts:
 
 | Part | What it does |
 |---|---|
 | **Skill** (`/tokentoll`) | Ask "how green is my coding?" and Claude runs the estimator and explains the result. |
-| **Dashboard** | An HTML page with animated tiles, a daily chart, and breakdowns by session, project and model. It can run live, updating every 5 seconds while you work. |
+| **Dashboard** | An HTML page with animated tiles, a daily chart, and breakdowns by session, project, model and tool. It can run live, updating every 5 seconds while you work. |
 | **Chat band** (optional) | A one-line strip above the Claude Code prompt with this session's and today's totals, plus **Dashboard** and **Audit** buttons. |
 
 > **These are estimates, not measurements.** The token counts are exact; they
@@ -155,7 +175,7 @@ counts Claude Code already writes to disk. It has three parts:
 
 ## Requirements
 
-- **Claude Code**, which writes the session logs this tool reads: `~/.claude/projects/**/*.jsonl`.
+- **At least one supported tool or API** from [Works with](#works-with).
 - **Python 3**, standard library only (no `pip install`). Tested with Python 3.14 on macOS.
 - **The band only:** a Claude Code build with hooks modules ("mods"). That API is marked early access and may change between releases.
 
@@ -200,6 +220,10 @@ or list that folder in the `CLAUDE_CODE_PLUGIN_DIRS` environment variable.
 
 **Update** with `git -C ~/.claude/skills/tokentoll pull`.
 
+**Not using Claude Code?** Clone the repo anywhere and run `python3 carbon.py`.
+The `/tokentoll` skill and the chat band are Claude Code features; the report,
+the live dashboard and every data source work without them.
+
 ---
 
 ## Usage
@@ -233,6 +257,9 @@ python3 ~/.claude/skills/tokentoll/carbon.py --json --session <session-id>
 | `--json` | off | Print `{"today": …, "session": …}` and exit |
 | `--session ID` | none | With `--json`: the session to total |
 | `--root PATH` | `~/.claude/projects` | Where the Claude Code logs are |
+| `--codex-root PATH` | `~/.codex/sessions` | Where the Codex logs are |
+| `--gemini-root PATH` | `~/.gemini/tmp` | Where the Gemini CLI logs are |
+| `--usage-file PATH` | `~/.tokentoll/usage.jsonl` | The file your apps append API usage to |
 
 The JSON looks like this. `g` is grams CO₂e, `kwh` is energy (= heat) and `water_l` is litres; all are central estimates:
 
@@ -240,6 +267,59 @@ The JSON looks like this. `g` is grams CO₂e, `kwh` is energy (= heat) and `wat
 {"today": {"g": 3105.05, "kwh": 7.7626, "water_l": 7.763},
  "session": {"g": 482.81, "kwh": 1.207, "water_l": 1.207, "tokens": 23889066}}
 ```
+
+### Log any AI API
+
+APIs keep no logs on your computer, so have your app add one line per call to
+`~/.tokentoll/usage.jsonl`. Pass the provider's `usage` object exactly as the
+API returns it; TokenToll reads each provider's own field names.
+
+```python
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+LOG = Path.home() / ".tokentoll" / "usage.jsonl"
+
+def log_usage(tool, model, usage):
+    """Append one API call's usage to TokenToll's usage file."""
+    if hasattr(usage, "model_dump"):  # SDK objects (OpenAI, Anthropic, Groq, google-genai, ...)
+        usage = usage.model_dump()
+    LOG.parent.mkdir(exist_ok=True)
+    with LOG.open("a") as f:
+        f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(),
+                            "tool": tool, "model": model, "usage": usage}) + "\n")
+```
+
+Then call it after each request:
+
+```python
+# OpenAI, or OpenAI-compatible SDKs: Groq, Mistral, xAI, DeepSeek, OpenRouter, Together
+r = client.chat.completions.create(model=MODEL, messages=messages)
+log_usage("groq", r.model, r.usage)
+
+# Anthropic
+r = client.messages.create(model=MODEL, max_tokens=1024, messages=messages)
+log_usage("anthropic", r.model, r.usage)
+
+# Google Gemini (google-genai)
+r = client.models.generate_content(model=MODEL, contents=prompt)
+log_usage("gemini", MODEL, r.usage_metadata)
+
+# AWS Bedrock (boto3 Converse)
+r = bedrock.converse(modelId=MODEL, messages=messages)
+log_usage("bedrock", MODEL, r["usage"])
+
+# Ollama
+r = ollama.chat(model=MODEL, messages=messages)
+log_usage("ollama", MODEL, {"prompt_eval_count": r.prompt_eval_count, "eval_count": r.eval_count})
+```
+
+- **Fields:** each line needs `ts`. `tool`, `model`, `session` and `project`
+  are optional and appear in the dashboard's tables.
+- **Other languages:** write the same JSON line yourself.
+- **Testing:** these snippets haven't been run against the live APIs; the
+  field handling is tested with sample usage objects.
 
 ---
 
@@ -252,8 +332,8 @@ intensity. It leaves out SCI's embodied-hardware term.
 
 ### 1. Tokens: read from your logs (exact)
 
-For every API response Claude Code logged, the script reads `message.usage`
-and sorts the tokens into three kinds:
+For every API response a tool logged, the script sorts the tokens into three
+kinds. For Claude Code, from `message.usage`:
 
 | Kind | Fields in the log |
 |---|---|
@@ -264,6 +344,25 @@ and sorts the tokens into three kinds:
 Claude Code writes the same response on several lines, and resumed sessions
 copy earlier history. Each response is therefore counted once, keyed by
 `message.id` + `requestId`. Subagent logs are included.
+
+The other sources map onto the same three kinds:
+
+- **Codex** logs a running total per session, so each update counts what the
+  total grew by. Its `input_tokens` include `cached_input_tokens`, and its
+  `output_tokens` include reasoning tokens.
+- **Gemini CLI** records `tokens` on each reply and may write a reply twice,
+  so each message ID counts once. Its `input` includes `cached`, `thoughts`
+  count as output, and `tool` counts as fresh input.
+- **API usage objects** are read in each provider's own format:
+
+| Provider | Fresh input | Cache read | Output |
+|---|---|---|---|
+| Anthropic | `input_tokens` + `cache_creation_input_tokens` | `cache_read_input_tokens` | `output_tokens` |
+| OpenAI chat and OpenAI-compatible APIs | `prompt_tokens` − cached | `prompt_tokens_details.cached_tokens` | `completion_tokens` |
+| OpenAI Responses | `input_tokens` − cached | `input_tokens_details.cached_tokens` | `output_tokens` |
+| Google Gemini | `promptTokenCount` − cached | `cachedContentTokenCount` | `candidatesTokenCount` + `thoughtsTokenCount` |
+| AWS Bedrock Converse | `inputTokens` + `cacheWriteInputTokens` | `cacheReadInputTokens` | `outputTokens` |
+| Ollama | `prompt_eval_count` | none | `eval_count` |
 
 ### 2. Energy per token (estimated)
 
@@ -296,7 +395,10 @@ Where the central figures come from:
 Two adjustments then apply:
 
 - **Model size**, taken from relative list price because no model sizes are
-  published: Haiku × 0.33, Sonnet × 1.0, Opus and Fable × 1.7, any other model × 1.0.
+  published: Haiku × 0.33, Sonnet × 1.0, Opus and Fable × 1.7. Other
+  vendors' models whose names mark a small tier (`mini`, `nano`, `flash`,
+  `lite`, `small`) count × 0.33; any other model × 1.0. These are assumptions,
+  not measurements.
 - **Data-centre overhead (PUE)** × 1.2, for cooling and power conversion.
   Google reports a fleet-wide PUE of 1.09 in the post above, so 1.2 leans
   conservative.
@@ -355,7 +457,7 @@ Every constant sits near the top of `carbon.py`:
 
 ## Privacy and security
 
-- **Nothing leaves your machine.** The script reads local files only and makes no outbound network requests.
+- **Nothing leaves your machine.** The script reads local files only (Claude Code, Codex and Gemini CLI logs, and your usage file), read-only, and makes no outbound network requests.
 - **The live server listens on `127.0.0.1` only.** The page shows your project names and session titles, so it isn't exposed to your network.
 - **It refuses requests addressed to any other host name** (HTTP 403). This stops DNS rebinding, where a web page points its own name at your computer to read local servers.
 - **Session titles are escaped.** They are text from your own logs, and the page escapes them so they can't inject markup.
@@ -413,10 +515,11 @@ claude plugin test ~/.claude/skills/tokentoll/band
 
 ## Known limitations
 
-- **It depends on Claude Code's log format.** The tool reads Claude Code's
-  internal session logs: `message.usage`, `message.id`, `requestId`,
-  `timestamp`, `cwd`, `sessionId`, and the `custom-title`, `ai-title` and
-  `last-prompt` records. That format isn't a documented API and may change.
+- **It depends on each tool's log format.** Claude Code, Codex and Gemini CLI
+  logs are internal files, not documented APIs, and may change between
+  releases. Claude Code fields read: `message.usage`, `message.id`,
+  `requestId`, `timestamp`, `cwd`, `sessionId`, and the `custom-title`,
+  `ai-title` and `last-prompt` records.
 - **Every rate is an estimate** whose range spans more than an order of
   magnitude. Cache reads usually dominate the total and have the least-known
   rate.

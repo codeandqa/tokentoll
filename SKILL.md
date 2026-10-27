@@ -1,11 +1,11 @@
 ---
 name: tokentoll
-description: Estimate the carbon (CO2e), energy/heat (kWh) and cooling-water footprint of your Claude Code usage from the token logs, and open a dashboard by day, project and model. Use when the user asks about the environmental impact, carbon footprint, emissions, energy, heat or water of their AI coding, or says "ai carbon", "how green is my coding", "my AI footprint".
+description: Estimate the carbon (CO2e), energy/heat (kWh) and cooling-water footprint of your AI coding (Claude Code, Codex, Gemini CLI, and any AI API logged to the usage file) from the token logs, and open a dashboard by day, session, project, model and tool. Use when the user asks about the environmental impact, carbon footprint, emissions, energy, heat or water of their AI coding, or says "ai carbon", "how green is my coding", "my AI footprint".
 ---
 
 # TokenToll: the carbon footprint of your AI coding
 
-Turns Claude Code token usage into an energy, carbon, heat and water estimate, with a low–high range.
+Turns AI token usage into an energy, carbon, heat and water estimate, with a low–high range. It reads Claude Code (`~/.claude/projects`), Codex (`~/.codex/sessions`) and Gemini CLI (`~/.gemini/tmp`) automatically, plus `~/.tokentoll/usage.jsonl` for any API the user logs (README: "Log any AI API").
 
 ## Run it
 
